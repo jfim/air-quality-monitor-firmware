@@ -1,6 +1,6 @@
 # Air quality monitor firmware
 
-Firmware for the air quality monitor project I built. See the blog post for more details.
+Firmware for the air quality monitor project I built. See the [blog post for more details](https://blog.jean-francois.im/2021/05/08/building-a-simple-air-quality-monitor/).
 
 ## Building
 
