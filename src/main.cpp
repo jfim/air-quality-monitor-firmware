@@ -9,8 +9,9 @@
 ArduinoOTAClass arduinoOTA;
 #endif
 
-const char* SERVER_HOSTNAME = "raspberrypi-jfim.local";
+const char* SERVER_HOSTNAME = "z820-jfim-ubuntu.boonet";
 const int SERVER_PORT = 1234;
+const float TEMPERATURE_OFFSET = -3.4f;
 
 #ifdef ENABLE_SERIAL_DEBUGGING
 #define DEBUG_PRINT(X) Serial.print(X)
@@ -449,7 +450,7 @@ void loop() {
     DEBUG_PRINT_2(humLsb & 0xFF, HEX);    
     DEBUG_PRINT("\n");
 
-    float temperature = ((175.0f * tempRaw) / 65535) - 45;
+    float temperature = ((175.0f * tempRaw) / 65535) - 45 + TEMPERATURE_OFFSET;
 
     DEBUG_PRINT("Temperature : ");
     DEBUG_PRINT(temperature);
@@ -526,7 +527,7 @@ void loop() {
     DEBUG_PRINT("\n");
 
     // Calculate binary format
-    uint8_t humidityMsb = min(floor(cH2O), 255.0);
+    uint8_t humidityMsb = min(floor(cH2O), 255.0f);
     uint8_t humidityLsb = (cH2O - floor(cH2O)) * 255.0f;
     DEBUG_PRINT("Humidity : ");
     DEBUG_PRINT_2(humidityMsb, DEC);
