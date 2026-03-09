@@ -4,14 +4,24 @@
 #include <SoftwareSerial.h>
 #include <Wire.h>
 #include <ESPAsyncTCP.h>
+#include <ESP8266WebServer.h>
+#include <LittleFS.h>
 
 #ifdef ENABLE_NETWORK
 ArduinoOTAClass arduinoOTA;
+ESP8266WebServer httpServer(80);
 #endif
 
-const char* SERVER_HOSTNAME = "z820-jfim-ubuntu.boonet";
-const int SERVER_PORT = 1234;
-const float TEMPERATURE_OFFSET = -3.4f;
+#if defined(ENABLE_NETWORK) && defined(ENABLE_CO2_SENSOR)
+bool do_s8_calibration = false;
+int ignore_s8_iteration_count = 0;
+bool s8_calibration_failed = false;
+#endif
+
+#define SERVER_HOSTNAME_MAX_LEN 64
+char serverHostname[SERVER_HOSTNAME_MAX_LEN] = "air-quality-server.local";
+int serverPort = 1234;
+float temperatureOffset = -3.4f;
 
 #ifdef ENABLE_SERIAL_DEBUGGING
 #define DEBUG_PRINT(X) Serial.print(X)
@@ -32,6 +42,27 @@ SoftwareSerial co2Sensor(D7, D0);
 // Particle sensor TX/ESP8266 RX: D6
 SoftwareSerial particleCounter(D6, D5);
 #endif
+
+uint16_t co2SensorStatus = -1;
+uint16_t co2SensorPpm = -1;
+uint16_t particleSensorPm1_0 = -1;
+uint16_t particleSensorPm2_5 = -1;
+uint16_t particleSensorPm10_0 = -1;
+uint16_t particleSensorParticle0_3um = -1;
+uint16_t particleSensorParticle0_5um = -1;
+uint16_t particleSensorParticle1_0um = -1;
+uint16_t particleSensorParticle2_5um = -1;
+uint16_t particleSensorParticle5_0um = -1;
+uint16_t particleSensorParticle10_0um = -1;
+uint16_t particleSensorChecksumOk = -1;
+float sht31Humidity = -1.0f;
+float sht31Temperature = -1.0f;
+uint16_t sht31HumidityChecksumOk = -1;
+uint16_t sht31TemperatureChecksumOk = -1;
+uint16_t sgp30co2eqPpm = -1;
+uint16_t sgp30tvocPpb = -1;
+uint16_t sgp30co2eqChecksumOk = -1;
+uint16_t sgp30tvocChecksumOk = -1;
 
 String macAddress("");
 #ifdef ENABLE_NETWORK_LOGGING
@@ -148,9 +179,152 @@ uint8_t sensirionCrc8(uint8_t msb, uint8_t lsb) {
   return crc;
 }
 
+uint16_t modbusCrc16(uint8_t* data, uint8_t len) {
+  uint16_t crc = 0xFFFF;
+  for (uint8_t i = 0; i < len; i++) {
+    crc ^= data[i];
+    for (uint8_t j = 0; j < 8; j++) {
+      if (crc & 0x0001)
+        crc = (crc >> 1) ^ 0xA001;
+      else
+        crc >>= 1;
+    }
+  }
+  return crc;
+}
+
+void loadConfig() {
+  if (LittleFS.exists("/config.txt")) {
+    File f = LittleFS.open("/config.txt", "r");
+    if (f) {
+      String hostname = f.readStringUntil('\n');
+      String port = f.readStringUntil('\n');
+      f.close();
+      hostname.trim();
+      port.trim();
+      if (hostname.length() > 0 && hostname.length() < SERVER_HOSTNAME_MAX_LEN) {
+        strncpy(serverHostname, hostname.c_str(), SERVER_HOSTNAME_MAX_LEN - 1);
+        serverHostname[SERVER_HOSTNAME_MAX_LEN - 1] = '\0';
+      }
+      if (port.length() > 0) {
+        serverPort = port.toInt();
+      }
+      String tempOffset = f.readStringUntil('\n');
+      tempOffset.trim();
+      if (tempOffset.length() > 0) {
+        temperatureOffset = tempOffset.toFloat();
+      }
+    }
+  }
+}
+
+void saveConfig() {
+  File f = LittleFS.open("/config.txt", "w");
+  if (f) {
+    f.println(serverHostname);
+    f.println(serverPort);
+    f.println(temperatureOffset);
+    f.close();
+  }
+}
+
+#ifdef ENABLE_NETWORK
+void handleRoot() {
+  String html = "<html><body><h2>Air Quality Monitor</h2>"
+    "<ul>"
+    "<li><a href='/status'>Status</a></li>"
+    "<li><a href='/config'>Configuration</a></li>"
+    "<li><a href='/calibrate'>Calibrate CO2 Sensor</a></li>"
+    "<li><a href='/factoryreset'>Factory Reset</a></li>"
+    "</ul></body></html>";
+  httpServer.send(200, "text/html", html);
+}
+
+void handleFactoryReset() {
+  httpServer.send(200, "text/plain", "Factory reset, rebooting...\n");
+  LittleFS.format();
+  ESP.eraseConfig();
+  ESP.restart();
+}
+
+void handleStatus() {
+  String json = "{\"config\":{\"hostname\":\"" + String(serverHostname) + "\","
+    "\"port\":" + String(serverPort) + ","
+    "\"temperatureOffset\":" + String(temperatureOffset) + "},"
+    "\"status\":{"
+    "\"macAddress\":\"" + macAddress + "\","
+    "\"uptimeMs\":" + String(millis()) + ","
+    "\"co2SensorStatus\":" + String(co2SensorStatus) + ","
+    "\"co2SensorPpm\":" + String(co2SensorPpm) + ","
+    "\"particleSensorChecksumOk\":" + String(particleSensorChecksumOk) + ","
+    "\"particleSensorPm1_0\":" + String(particleSensorPm1_0) + ","
+    "\"particleSensorPm2_5\":" + String(particleSensorPm2_5) + ","
+    "\"particleSensorPm10_0\":" + String(particleSensorPm10_0) + ","
+    "\"particleSensorParticle0_3um\":" + String(particleSensorParticle0_3um) + ","
+    "\"particleSensorParticle0_5um\":" + String(particleSensorParticle0_5um) + ","
+    "\"particleSensorParticle1_0um\":" + String(particleSensorParticle1_0um) + ","
+    "\"particleSensorParticle2_5um\":" + String(particleSensorParticle2_5um) + ","
+    "\"particleSensorParticle5_0um\":" + String(particleSensorParticle5_0um) + ","
+    "\"particleSensorParticle10_0um\":" + String(particleSensorParticle10_0um) + ","
+    "\"sht31Temperature\":" + String(sht31Temperature) + ","
+    "\"sht31Humidity\":" + String(sht31Humidity) + ","
+    "\"sht31TemperatureChecksumOk\":" + String(sht31TemperatureChecksumOk) + ","
+    "\"sht31HumidityChecksumOk\":" + String(sht31HumidityChecksumOk) + ","
+    "\"sgp30co2eqPpm\":" + String(sgp30co2eqPpm) + ","
+    "\"sgp30tvocPpb\":" + String(sgp30tvocPpb) + ","
+    "\"sgp30co2eqChecksumOk\":" + String(sgp30co2eqChecksumOk) + ","
+    "\"sgp30tvocChecksumOk\":" + String(sgp30tvocChecksumOk) + "}}";
+  httpServer.send(200, "application/json", json);
+}
+
+void handleConfigGet() {
+  String html = "<html><body><h2>Sensor Configuration</h2>"
+    "<form method='POST' action='/config'>"
+    "<label>Server hostname: <input name='hostname' value='" + String(serverHostname) + "' maxlength='63'></label><br><br>"
+    "<label>Server port: <input name='port' type='number' value='" + String(serverPort) + "'></label><br><br>"
+    "<label>Temperature offset: <input name='tempoffset' type='number' step='0.1' value='" + String(temperatureOffset) + "'></label><br><br>"
+    "<input type='submit' value='Save'>"
+    "</form></body></html>";
+  httpServer.send(200, "text/html", html);
+}
+
+void handleConfigPost() {
+  if (httpServer.hasArg("hostname") && httpServer.arg("hostname").length() > 0 &&
+      httpServer.hasArg("port") && httpServer.arg("port").length() > 0 &&
+      httpServer.hasArg("tempoffset") && httpServer.arg("tempoffset").length() > 0) {
+    String hostname = httpServer.arg("hostname");
+    if (hostname.length() < SERVER_HOSTNAME_MAX_LEN) {
+      strncpy(serverHostname, hostname.c_str(), SERVER_HOSTNAME_MAX_LEN - 1);
+      serverHostname[SERVER_HOSTNAME_MAX_LEN - 1] = '\0';
+    }
+    serverPort = httpServer.arg("port").toInt();
+    temperatureOffset = httpServer.arg("tempoffset").toFloat();
+    saveConfig();
+    httpServer.send(200, "text/html", "<html><body><h2>Configuration saved</h2>"
+      "<p>Hostname: " + String(serverHostname) + "</p>"
+      "<p>Port: " + String(serverPort) + "</p>"
+      "<p>Temperature offset: " + String(temperatureOffset) + "</p>"
+      "<a href='/config'>Back</a></body></html>");
+  } else {
+    httpServer.send(400, "text/plain", "Missing hostname, port, or temperature offset\n");
+  }
+}
+#endif
+
+#if defined(ENABLE_NETWORK) && defined(ENABLE_CO2_SENSOR)
+void handleCalibrate() {
+  do_s8_calibration = true;
+  httpServer.send(200, "text/plain", "Calibration scheduled\n");
+}
+#endif
+
+bool shouldSaveConfig = false;
+
 void setup() {
   Serial.begin(9600);
 
+  LittleFS.begin();
+  loadConfig();
 
 #if defined(ENABLE_SHT31) || defined(ENABLE_SGP30)
   Wire.begin();
@@ -170,7 +344,7 @@ void setup() {
   Wire.write(0x03);
   Wire.endTransmission();
 #else
-  DEBUG_PRINT("SHT31 disabled\n");
+  DEBUG_PRINT("SGP30 disabled\n");
 #endif
 
   // Init software UARTs
@@ -195,13 +369,43 @@ void setup() {
 #ifdef ENABLE_NETWORK
   WiFiManager wifiManager;
 
+  char portStr[6];
+  snprintf(portStr, sizeof(portStr), "%d", serverPort);
+  char tempOffsetStr[8];
+  snprintf(tempOffsetStr, sizeof(tempOffsetStr), "%.1f", temperatureOffset);
+  WiFiManagerParameter hostnameParam("hostname", "Server hostname", serverHostname, SERVER_HOSTNAME_MAX_LEN);
+  WiFiManagerParameter portParam("port", "Server port", portStr, 6);
+  WiFiManagerParameter tempOffsetParam("tempoffset", "Temperature offset", tempOffsetStr, 8);
+  wifiManager.addParameter(&hostnameParam);
+  wifiManager.addParameter(&portParam);
+  wifiManager.addParameter(&tempOffsetParam);
+  wifiManager.setSaveConfigCallback([]() { shouldSaveConfig = true; });
+
   if(!wifiManager.autoConnect()) {
     Serial.println("Failed to connect to wifi");
     ESP.restart();
     delay(1000);
   }
 
+  if (shouldSaveConfig) {
+    strncpy(serverHostname, hostnameParam.getValue(), SERVER_HOSTNAME_MAX_LEN - 1);
+    serverHostname[SERVER_HOSTNAME_MAX_LEN - 1] = '\0';
+    serverPort = atoi(portParam.getValue());
+    temperatureOffset = atof(tempOffsetParam.getValue());
+    saveConfig();
+  }
+
   arduinoOTA.begin();
+
+  httpServer.on("/", handleRoot);
+  httpServer.on("/status", handleStatus);
+  httpServer.on("/config", HTTP_GET, handleConfigGet);
+  httpServer.on("/config", HTTP_POST, handleConfigPost);
+  httpServer.on("/factoryreset", handleFactoryReset);
+#ifdef ENABLE_CO2_SENSOR
+  httpServer.on("/calibrate", handleCalibrate);
+#endif
+  httpServer.begin();
 #endif
 
 #ifdef ENABLE_NETWORK_LOGGING
@@ -218,31 +422,85 @@ void setup() {
 }
 
 void loop() {
-  uint16_t co2SensorStatus = -1;
-  uint16_t co2SensorPpm = -1;
-  uint16_t particleSensorPm1_0 = -1;
-  uint16_t particleSensorPm2_5 = -1;
-  uint16_t particleSensorPm10_0 = -1;
-  uint16_t particleSensorParticle0_3um = -1;
-  uint16_t particleSensorParticle0_5um = -1;
-  uint16_t particleSensorParticle1_0um = -1;
-  uint16_t particleSensorParticle2_5um = -1;
-  uint16_t particleSensorParticle5_0um = -1;
-  uint16_t particleSensorParticle10_0um = -1;
-  uint16_t particleSensorChecksumOk = -1;
-  float sht31Humidity = -1.0f;
-  float sht31Temperature = -1.0f;
-  uint16_t sht31HumidityChecksumOk = -1;
-  uint16_t sht31TemperatureChecksumOk = -1;
-  uint16_t sgp30co2eqPpm = -1;
-  uint16_t sgp30tvocPpb = -1;
-  uint16_t sgp30co2eqChecksumOk = -1;
-  uint16_t sgp30tvocChecksumOk = -1;
+  co2SensorStatus = -1;
+  co2SensorPpm = -1;
+  particleSensorPm1_0 = -1;
+  particleSensorPm2_5 = -1;
+  particleSensorPm10_0 = -1;
+  particleSensorParticle0_3um = -1;
+  particleSensorParticle0_5um = -1;
+  particleSensorParticle1_0um = -1;
+  particleSensorParticle2_5um = -1;
+  particleSensorParticle5_0um = -1;
+  particleSensorParticle10_0um = -1;
+  particleSensorChecksumOk = -1;
+  sht31Humidity = -1.0f;
+  sht31Temperature = -1.0f;
+  sht31HumidityChecksumOk = -1;
+  sht31TemperatureChecksumOk = -1;
+  sgp30co2eqPpm = -1;
+  sgp30tvocPpb = -1;
+  sgp30co2eqChecksumOk = -1;
+  sgp30tvocChecksumOk = -1;
 
 #ifdef ENABLE_CO2_SENSOR
   if(co2Sensor.available()) {
     while(co2Sensor.available()) {
       co2Sensor.read();
+    }
+  }
+#endif
+
+#if defined(ENABLE_NETWORK) && defined(ENABLE_CO2_SENSOR)
+  if (do_s8_calibration) {
+    do_s8_calibration = false;
+    DEBUG_PRINT("Sending S8 background calibration command\n");
+    co2Sensor.listen();
+    // Background calibration command: write HR1 = 0x7C06
+    co2Sensor.write(0xFE);
+    co2Sensor.write(0x06);
+    co2Sensor.write(0x00);
+    co2Sensor.write(0x01);
+    co2Sensor.write(0x7C);
+    co2Sensor.write(0x06);
+    co2Sensor.write(0x6C);
+    co2Sensor.write(0xC7);
+    ignore_s8_iteration_count = 5;
+  }
+
+  if (ignore_s8_iteration_count > 0) {
+    ignore_s8_iteration_count--;
+    if (ignore_s8_iteration_count == 0) {
+      // Read HR1 to check calibration acknowledgement
+      co2Sensor.listen();
+      co2Sensor.write(0xFE);
+      co2Sensor.write(0x03);
+      co2Sensor.write(0x00);
+      co2Sensor.write(0x00);
+      co2Sensor.write(0x00);
+      co2Sensor.write(0x01);
+      co2Sensor.write(0x90);
+      co2Sensor.write(0x05);
+      delay(100);
+
+      if (co2Sensor.available() && co2Sensor.available() >= 7) {
+        uint8_t resp[7];
+        for (int i = 0; i < 7; ++i) {
+          resp[i] = co2Sensor.read();
+        }
+        uint16_t hr1 = (resp[3] << 8) | resp[4];
+        // Bit 5 of HR1 indicates acknowledgement
+        if (hr1 & 0x0020) {
+          DEBUG_PRINT("S8 calibration acknowledged\n");
+          s8_calibration_failed = false;
+        } else {
+          DEBUG_PRINT("S8 calibration NOT acknowledged\n");
+          s8_calibration_failed = true;
+        }
+      } else {
+        DEBUG_PRINT("S8 calibration status read failed\n");
+        s8_calibration_failed = true;
+      }
     }
   }
 #endif
@@ -267,46 +525,60 @@ void loop() {
 
   // Read sensor status
 #ifdef ENABLE_CO2_SENSOR
-  DEBUG_PRINT("Reading from CO2 sensor\n");
-  co2Sensor.listen();
-  co2Sensor.write(0xFE);
-  co2Sensor.write(0x04);
-  co2Sensor.write(0x00);
-  co2Sensor.write(0x00);
-  co2Sensor.write(0x00);
-  co2Sensor.write(0x04);
-  co2Sensor.write(0xE5);
-  co2Sensor.write(0xC6);
-  delay(100);
+#if defined(ENABLE_NETWORK)
+  if (ignore_s8_iteration_count > 0) {
+    DEBUG_PRINT("Skipping CO2 sensor read (calibration cooldown)\n");
+  } else if (s8_calibration_failed) {
+    DEBUG_PRINT("Skipping CO2 sensor read (calibration failed)\n");
+    co2SensorStatus = 65535;
+    co2SensorPpm = 65535;
+  } else
+#endif
+  {
+    DEBUG_PRINT("Reading from CO2 sensor\n");
+    co2Sensor.listen();
+    co2Sensor.write(0xFE);
+    co2Sensor.write(0x04);
+    co2Sensor.write(0x00);
+    co2Sensor.write(0x00);
+    co2Sensor.write(0x00);
+    co2Sensor.write(0x04);
+    co2Sensor.write(0xE5);
+    co2Sensor.write(0xC6);
+    delay(100);
 
-  // There's a bug in co2Sensor.available(), it won't return the right number of bytes the first time it's called :-/
-  if(co2Sensor.available() && co2Sensor.available() >= 13) {
-    uint8_t sensorPacket[13];
-    for(int i = 0; i < 13; ++i) {
-      sensorPacket[i] = co2Sensor.read();
-    }
-    if (sensorPacket[0] == 0xFE && sensorPacket[1] == 0x04 && sensorPacket[2] == 0x08) {
-      uint16_t sensorStatus = (sensorPacket[3] << 8) | sensorPacket[4];
-      uint16_t co2Ppm = (sensorPacket[9] << 8) | sensorPacket[10];
-      uint16_t checksum = (sensorPacket[11] << 8) | sensorPacket[12];
-      DEBUG_PRINT("CO2 sensor status: ");
-      DEBUG_PRINT_2(sensorStatus, HEX);
-      DEBUG_PRINT("\nCO2 ppm: ");
-      DEBUG_PRINT_2(co2Ppm, DEC);
-      DEBUG_PRINT("\n");
+    // There's a bug in co2Sensor.available(), it won't return the right number of bytes the first time it's called :-/
+    if(co2Sensor.available() && co2Sensor.available() >= 13) {
+      uint8_t sensorPacket[13];
+      for(int i = 0; i < 13; ++i) {
+        sensorPacket[i] = co2Sensor.read();
+      }
+      // Modbus CRC is little-endian: low byte first
+      uint16_t receivedCrc = sensorPacket[11] | (sensorPacket[12] << 8);
+      uint16_t computedCrc = modbusCrc16(sensorPacket, 11);
+      if (sensorPacket[0] == 0xFE && sensorPacket[1] == 0x04 && sensorPacket[2] == 0x08 &&
+          receivedCrc == computedCrc) {
+        uint16_t sensorStatus = (sensorPacket[3] << 8) | sensorPacket[4];
+        uint16_t co2Ppm = (sensorPacket[9] << 8) | sensorPacket[10];
+        DEBUG_PRINT("CO2 sensor status: ");
+        DEBUG_PRINT_2(sensorStatus, HEX);
+        DEBUG_PRINT("\nCO2 ppm: ");
+        DEBUG_PRINT_2(co2Ppm, DEC);
+        DEBUG_PRINT("\n");
 
-      co2SensorStatus = sensorStatus;
-      co2SensorPpm = co2Ppm;
+        co2SensorStatus = sensorStatus;
+        co2SensorPpm = co2Ppm;
+      } else {
+        DEBUG_PRINT("Corrupted CO2 sensor frame\n");
+
+        co2SensorStatus = -1;
+        co2SensorPpm = -1;
+      }
     } else {
-      DEBUG_PRINT("Corrupted CO2 sensor frame\n");
-      
-      co2SensorStatus = -1;
-      co2SensorPpm = -1;
+      DEBUG_PRINT("Less than 13 bytes available: ");
+      DEBUG_PRINT_2(co2Sensor.available(), HEX);
+      DEBUG_PRINT("\n");
     }
-  } else {
-    DEBUG_PRINT("Less than 13 bytes available: ");
-    DEBUG_PRINT_2(co2Sensor.available(), HEX);
-    DEBUG_PRINT("\n");
   }
 #else
   DEBUG_PRINT("Skipping CO2 sensor read\n");
@@ -397,6 +669,14 @@ void loop() {
         particleSensorChecksumOk = 0;
       }
 
+      uint8_t sensorErrorCode = data[12] & 0xFF;
+      if (sensorErrorCode != 0) {
+        DEBUG_PRINT("Particle sensor error code: ");
+        DEBUG_PRINT_2(sensorErrorCode, HEX);
+        DEBUG_PRINT("\n");
+        particleSensorChecksumOk = 0;
+      }
+
       particleSensorPm1_0 = data[3];
       particleSensorPm2_5 = data[4];
       particleSensorPm10_0 = data[5];
@@ -450,7 +730,7 @@ void loop() {
     DEBUG_PRINT_2(humLsb & 0xFF, HEX);    
     DEBUG_PRINT("\n");
 
-    float temperature = ((175.0f * tempRaw) / 65535) - 45 + TEMPERATURE_OFFSET;
+    float temperature = ((175.0f * tempRaw) / 65535) - 45 + temperatureOffset;
 
     DEBUG_PRINT("Temperature : ");
     DEBUG_PRINT(temperature);
@@ -643,7 +923,7 @@ void loop() {
     asyncClient.write(messageBuffer);
   } else if(!asyncClient.connecting()) {
     DEBUG_PRINT("Connecting to server\n");
-    asyncClient.connect(SERVER_HOSTNAME, SERVER_PORT);
+    asyncClient.connect(serverHostname, serverPort);
   } else {
     DEBUG_PRINT("Awaiting connection\n");
   }
@@ -654,5 +934,6 @@ void loop() {
 
 #ifdef ENABLE_NETWORK
   arduinoOTA.handle();
+  httpServer.handleClient();
 #endif
 }
