@@ -2,7 +2,7 @@
 
 Firmware for the air quality monitor project I built. See the [blog post for more details](https://blog.jean-francois.im/2021/05/08/building-a-simple-air-quality-monitor/).
 
-The firmware allows accessing the various sensor readings through a `/status` endpoint (returns JSON), by pushing them as CSV values to a user configurable server that can log those, or by logging them as CSV values over the USB serial port.
+The firmware allows accessing the various sensor readings through a `/status` endpoint (returns JSON), by pushing them as CSV values to a [user configurable server that can log those](https://github.com/jfim/air-quality-server), or by logging them as CSV values over the USB serial port.
 
 ## Hardware
 
