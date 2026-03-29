@@ -764,7 +764,7 @@ void setup() {
   httpServer.begin();
 #endif
 
-#ifdef ENABLE_NETWORK_LOGGING
+#if defined(ENABLE_NETWORK_LOGGING) || defined(ENABLE_MQTT)
   uint8_t hwAddr[6];
   WiFi.macAddress(hwAddr);
   macAddress.reserve(12);
