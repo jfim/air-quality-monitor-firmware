@@ -328,7 +328,13 @@ void handleFactoryReset() {
 void handleStatus() {
   String json = "{\"config\":{\"hostname\":\"" + String(serverHostname) + "\","
     "\"port\":" + String(serverPort) + ","
-    "\"temperatureOffset\":" + String(temperatureOffset) + "},"
+    "\"temperatureOffset\":" + String(temperatureOffset) + ","
+    "\"mqttHost\":\"" + String(mqttHost) + "\","
+    "\"mqttPort\":" + String(mqttPort) + ","
+    "\"tcpLoggingEnabled\":" + String(tcpLoggingEnabled ? "true" : "false") + ","
+    "\"mqttEnabled\":" + String(mqttEnabled ? "true" : "false") + ","
+    "\"mqttHaDiscoveryEnabled\":" + String(mqttHaDiscoveryEnabled ? "true" : "false") + ","
+    "\"serialLoggingEnabled\":" + String(serialLoggingEnabled ? "true" : "false") + "},"
     "\"status\":{"
     "\"macAddress\":\"" + macAddress + "\","
     "\"uptimeMs\":" + String(millis()) + ","
@@ -358,9 +364,20 @@ void handleStatus() {
 void handleConfigGet() {
   String html = "<html><body><h2>Sensor Configuration</h2>"
     "<form method='POST' action='/config'>"
+    "<h3>Server</h3>"
     "<label>Server hostname: <input name='hostname' value='" + String(serverHostname) + "' maxlength='63'></label><br><br>"
     "<label>Server port: <input name='port' type='number' value='" + String(serverPort) + "'></label><br><br>"
     "<label>Temperature offset: <input name='tempoffset' type='number' step='0.1' value='" + String(temperatureOffset) + "'></label><br><br>"
+    "<h3>MQTT</h3>"
+    "<label>MQTT host: <input name='mqtt_host' value='" + String(mqttHost) + "' maxlength='63'></label><br><br>"
+    "<label>MQTT port: <input name='mqtt_port' type='number' value='" + String(mqttPort) + "'></label><br><br>"
+    "<label>MQTT username: <input name='mqtt_user' value='" + String(mqttUser) + "' maxlength='63'></label><br><br>"
+    "<label>MQTT password: <input name='mqtt_pass' type='password' value='" + String(mqttPass) + "' maxlength='63'></label><br><br>"
+    "<h3>Logging</h3>"
+    "<label><input name='tcp_logging' type='checkbox'" + String(tcpLoggingEnabled ? " checked" : "") + "> TCP logging</label><br><br>"
+    "<label><input name='mqtt_logging' type='checkbox'" + String(mqttEnabled ? " checked" : "") + "> MQTT publishing</label><br><br>"
+    "<label><input name='mqtt_ha' type='checkbox'" + String(mqttHaDiscoveryEnabled ? " checked" : "") + "> MQTT HA discovery</label><br><br>"
+    "<label><input name='serial_logging' type='checkbox'" + String(serialLoggingEnabled ? " checked" : "") + "> Serial logging</label><br><br>"
     "<input type='submit' value='Save'>"
     "</form></body></html>";
   httpServer.send(200, "text/html", html);
@@ -377,11 +394,40 @@ void handleConfigPost() {
     }
     serverPort = httpServer.arg("port").toInt();
     temperatureOffset = httpServer.arg("tempoffset").toFloat();
+
+    if (httpServer.hasArg("mqtt_host")) {
+      String mh = httpServer.arg("mqtt_host");
+      if (mh.length() < MQTT_HOST_MAX_LEN) {
+        strncpy(mqttHost, mh.c_str(), MQTT_HOST_MAX_LEN - 1);
+        mqttHost[MQTT_HOST_MAX_LEN - 1] = '\0';
+      }
+    }
+    if (httpServer.hasArg("mqtt_port") && httpServer.arg("mqtt_port").length() > 0) {
+      mqttPort = httpServer.arg("mqtt_port").toInt();
+    }
+    if (httpServer.hasArg("mqtt_user")) {
+      String mu = httpServer.arg("mqtt_user");
+      if (mu.length() < MQTT_USER_MAX_LEN) {
+        strncpy(mqttUser, mu.c_str(), MQTT_USER_MAX_LEN - 1);
+        mqttUser[MQTT_USER_MAX_LEN - 1] = '\0';
+      }
+    }
+    if (httpServer.hasArg("mqtt_pass")) {
+      String mp = httpServer.arg("mqtt_pass");
+      if (mp.length() < MQTT_PASS_MAX_LEN) {
+        strncpy(mqttPass, mp.c_str(), MQTT_PASS_MAX_LEN - 1);
+        mqttPass[MQTT_PASS_MAX_LEN - 1] = '\0';
+      }
+    }
+
+    // Checkboxes: present in POST = checked, absent = unchecked
+    tcpLoggingEnabled = httpServer.hasArg("tcp_logging");
+    mqttEnabled = httpServer.hasArg("mqtt_logging");
+    mqttHaDiscoveryEnabled = httpServer.hasArg("mqtt_ha");
+    serialLoggingEnabled = httpServer.hasArg("serial_logging");
+
     saveConfig();
     httpServer.send(200, "text/html", "<html><body><h2>Configuration saved</h2>"
-      "<p>Hostname: " + String(serverHostname) + "</p>"
-      "<p>Port: " + String(serverPort) + "</p>"
-      "<p>Temperature offset: " + String(temperatureOffset) + "</p>"
       "<p>Rebooting...</p></body></html>");
     delay(500);
     ESP.restart();
