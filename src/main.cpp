@@ -949,63 +949,67 @@ void loop() {
 #endif
 
 #ifdef ENABLE_SERIAL_LOGGING
-  // co2Status,co2Ppm,particleChecksumOk,particlePm1_0,particlePm2_5,particlePm10_0,particleCount0_3um,particleCount0_5um,particleCount1_0um,particleCount2_5um,particleCount5_0um,particleCount10_0um,temp,humidity,tempChecksumOk,humidityChecksumOk,co2eqPpm,tvocPpb,co2eqChecksumOk,tvocChecksumOk
-  writeSingleLineStatusItem(co2SensorStatus);
-  writeSingleLineStatusItem(co2SensorPpm);
-  writeSingleLineStatusItem(particleSensorChecksumOk);
-  writeSingleLineStatusItem(particleSensorPm1_0);
-  writeSingleLineStatusItem(particleSensorPm2_5);
-  writeSingleLineStatusItem(particleSensorPm10_0);
-  writeSingleLineStatusItem(particleSensorParticle0_3um);
-  writeSingleLineStatusItem(particleSensorParticle0_5um);
-  writeSingleLineStatusItem(particleSensorParticle1_0um);
-  writeSingleLineStatusItem(particleSensorParticle2_5um);
-  writeSingleLineStatusItem(particleSensorParticle5_0um);
-  writeSingleLineStatusItem(particleSensorParticle10_0um);
-  writeSingleLineStatusItem(sht31Temperature);
-  writeSingleLineStatusItem(sht31Humidity);
-  writeSingleLineStatusItem(sht31TemperatureChecksumOk);
-  writeSingleLineStatusItem(sht31HumidityChecksumOk);
-  writeSingleLineStatusItem(sgp30co2eqPpm);
-  writeSingleLineStatusItem(sgp30tvocPpb);
-  writeSingleLineStatusItem(sgp30co2eqChecksumOk);
-  writeSingleLineStatusItem(sgp30tvocChecksumOk, true);
+  if (serialLoggingEnabled) {
+    // co2Status,co2Ppm,particleChecksumOk,particlePm1_0,particlePm2_5,particlePm10_0,particleCount0_3um,particleCount0_5um,particleCount1_0um,particleCount2_5um,particleCount5_0um,particleCount10_0um,temp,humidity,tempChecksumOk,humidityChecksumOk,co2eqPpm,tvocPpb,co2eqChecksumOk,tvocChecksumOk
+    writeSingleLineStatusItem(co2SensorStatus);
+    writeSingleLineStatusItem(co2SensorPpm);
+    writeSingleLineStatusItem(particleSensorChecksumOk);
+    writeSingleLineStatusItem(particleSensorPm1_0);
+    writeSingleLineStatusItem(particleSensorPm2_5);
+    writeSingleLineStatusItem(particleSensorPm10_0);
+    writeSingleLineStatusItem(particleSensorParticle0_3um);
+    writeSingleLineStatusItem(particleSensorParticle0_5um);
+    writeSingleLineStatusItem(particleSensorParticle1_0um);
+    writeSingleLineStatusItem(particleSensorParticle2_5um);
+    writeSingleLineStatusItem(particleSensorParticle5_0um);
+    writeSingleLineStatusItem(particleSensorParticle10_0um);
+    writeSingleLineStatusItem(sht31Temperature);
+    writeSingleLineStatusItem(sht31Humidity);
+    writeSingleLineStatusItem(sht31TemperatureChecksumOk);
+    writeSingleLineStatusItem(sht31HumidityChecksumOk);
+    writeSingleLineStatusItem(sgp30co2eqPpm);
+    writeSingleLineStatusItem(sgp30tvocPpb);
+    writeSingleLineStatusItem(sgp30co2eqChecksumOk);
+    writeSingleLineStatusItem(sgp30tvocChecksumOk, true);
+  }
 #endif
 
 #ifdef ENABLE_NETWORK_LOGGING
-  if(asyncClient.connected()) {
-    // macAddress,millis,co2Status,co2Ppm,particleChecksumOk,particlePm1_0,particlePm2_5,particlePm10_0,particleCount0_3um,particleCount0_5um,particleCount1_0um,particleCount2_5um,particleCount5_0um,particleCount10_0um,temp,humidity,tempChecksumOk,humidityChecksumOk,co2eqPpm,tvocPpb,co2eqChecksumOk,tvocChecksumOk
-    String message("");
-    message.reserve(MESSAGE_MAX_LEN);
-    appendSingleLineStatusItem(message, macAddress);
-    appendSingleLineStatusItem(message, millis());
-    appendSingleLineStatusItem(message, co2SensorStatus);
-    appendSingleLineStatusItem(message, co2SensorPpm);
-    appendSingleLineStatusItem(message, particleSensorChecksumOk);
-    appendSingleLineStatusItem(message, particleSensorPm1_0);
-    appendSingleLineStatusItem(message, particleSensorPm2_5);
-    appendSingleLineStatusItem(message, particleSensorPm10_0);
-    appendSingleLineStatusItem(message, particleSensorParticle0_3um);
-    appendSingleLineStatusItem(message, particleSensorParticle0_5um);
-    appendSingleLineStatusItem(message, particleSensorParticle1_0um);
-    appendSingleLineStatusItem(message, particleSensorParticle2_5um);
-    appendSingleLineStatusItem(message, particleSensorParticle5_0um);
-    appendSingleLineStatusItem(message, particleSensorParticle10_0um);
-    appendSingleLineStatusItem(message, sht31Temperature);
-    appendSingleLineStatusItem(message, sht31Humidity);
-    appendSingleLineStatusItem(message, sht31TemperatureChecksumOk);
-    appendSingleLineStatusItem(message, sht31HumidityChecksumOk);
-    appendSingleLineStatusItem(message, sgp30co2eqPpm);
-    appendSingleLineStatusItem(message, sgp30tvocPpb);
-    appendSingleLineStatusItem(message, sgp30co2eqChecksumOk);
-    appendSingleLineStatusItem(message, sgp30tvocChecksumOk, true);
-    strncpy(messageBuffer, message.c_str(), MESSAGE_MAX_LEN);
-    asyncClient.write(messageBuffer);
-  } else if(!asyncClient.connecting()) {
-    DEBUG_PRINT("Connecting to server\n");
-    asyncClient.connect(serverHostname, serverPort);
-  } else {
-    DEBUG_PRINT("Awaiting connection\n");
+  if (tcpLoggingEnabled) {
+    if(asyncClient.connected()) {
+      // macAddress,millis,co2Status,co2Ppm,particleChecksumOk,particlePm1_0,particlePm2_5,particlePm10_0,particleCount0_3um,particleCount0_5um,particleCount1_0um,particleCount2_5um,particleCount5_0um,particleCount10_0um,temp,humidity,tempChecksumOk,humidityChecksumOk,co2eqPpm,tvocPpb,co2eqChecksumOk,tvocChecksumOk
+      String message("");
+      message.reserve(MESSAGE_MAX_LEN);
+      appendSingleLineStatusItem(message, macAddress);
+      appendSingleLineStatusItem(message, millis());
+      appendSingleLineStatusItem(message, co2SensorStatus);
+      appendSingleLineStatusItem(message, co2SensorPpm);
+      appendSingleLineStatusItem(message, particleSensorChecksumOk);
+      appendSingleLineStatusItem(message, particleSensorPm1_0);
+      appendSingleLineStatusItem(message, particleSensorPm2_5);
+      appendSingleLineStatusItem(message, particleSensorPm10_0);
+      appendSingleLineStatusItem(message, particleSensorParticle0_3um);
+      appendSingleLineStatusItem(message, particleSensorParticle0_5um);
+      appendSingleLineStatusItem(message, particleSensorParticle1_0um);
+      appendSingleLineStatusItem(message, particleSensorParticle2_5um);
+      appendSingleLineStatusItem(message, particleSensorParticle5_0um);
+      appendSingleLineStatusItem(message, particleSensorParticle10_0um);
+      appendSingleLineStatusItem(message, sht31Temperature);
+      appendSingleLineStatusItem(message, sht31Humidity);
+      appendSingleLineStatusItem(message, sht31TemperatureChecksumOk);
+      appendSingleLineStatusItem(message, sht31HumidityChecksumOk);
+      appendSingleLineStatusItem(message, sgp30co2eqPpm);
+      appendSingleLineStatusItem(message, sgp30tvocPpb);
+      appendSingleLineStatusItem(message, sgp30co2eqChecksumOk);
+      appendSingleLineStatusItem(message, sgp30tvocChecksumOk, true);
+      strncpy(messageBuffer, message.c_str(), MESSAGE_MAX_LEN);
+      asyncClient.write(messageBuffer);
+    } else if(!asyncClient.connecting()) {
+      DEBUG_PRINT("Connecting to server\n");
+      asyncClient.connect(serverHostname, serverPort);
+    } else {
+      DEBUG_PRINT("Awaiting connection\n");
+    }
   }
 #endif
 
