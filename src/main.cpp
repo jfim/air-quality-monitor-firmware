@@ -81,6 +81,50 @@ uint16_t sgp30co2eqChecksumOk = -1;
 uint16_t sgp30tvocChecksumOk = -1;
 
 String macAddress("");
+
+#ifdef ENABLE_MQTT
+#define MQTT_SAMPLE_COUNT 30
+#define MQTT_MIN_SAMPLES 6
+#define MQTT_PUBLISH_INTERVAL_MS 30000
+
+// uint16_t sensor sample buffers
+uint16_t samplesCo2Ppm[MQTT_SAMPLE_COUNT];
+uint16_t samplesCo2Status[MQTT_SAMPLE_COUNT];
+uint16_t samplesPm1_0[MQTT_SAMPLE_COUNT];
+uint16_t samplesPm2_5[MQTT_SAMPLE_COUNT];
+uint16_t samplesPm10_0[MQTT_SAMPLE_COUNT];
+uint16_t samplesParticle0_3um[MQTT_SAMPLE_COUNT];
+uint16_t samplesParticle0_5um[MQTT_SAMPLE_COUNT];
+uint16_t samplesParticle1_0um[MQTT_SAMPLE_COUNT];
+uint16_t samplesParticle2_5um[MQTT_SAMPLE_COUNT];
+uint16_t samplesParticle5_0um[MQTT_SAMPLE_COUNT];
+uint16_t samplesParticle10_0um[MQTT_SAMPLE_COUNT];
+uint16_t samplesSgp30co2eq[MQTT_SAMPLE_COUNT];
+uint16_t samplesSgp30tvoc[MQTT_SAMPLE_COUNT];
+
+uint8_t sampleCountCo2Ppm = 0;
+uint8_t sampleCountCo2Status = 0;
+uint8_t sampleCountPm1_0 = 0;
+uint8_t sampleCountPm2_5 = 0;
+uint8_t sampleCountPm10_0 = 0;
+uint8_t sampleCountParticle0_3um = 0;
+uint8_t sampleCountParticle0_5um = 0;
+uint8_t sampleCountParticle1_0um = 0;
+uint8_t sampleCountParticle2_5um = 0;
+uint8_t sampleCountParticle5_0um = 0;
+uint8_t sampleCountParticle10_0um = 0;
+uint8_t sampleCountSgp30co2eq = 0;
+uint8_t sampleCountSgp30tvoc = 0;
+
+// float sensor sample buffers
+float samplesSht31Temp[MQTT_SAMPLE_COUNT];
+float samplesSht31Hum[MQTT_SAMPLE_COUNT];
+uint8_t sampleCountSht31Temp = 0;
+uint8_t sampleCountSht31Hum = 0;
+
+unsigned long lastMqttPublishMs = 0;
+#endif
+
 #ifdef ENABLE_NETWORK_LOGGING
 AsyncClient asyncClient;
 #define MESSAGE_MAX_LEN 256
@@ -445,6 +489,78 @@ void handleCalibrate() {
 #endif
 
 bool shouldSaveConfig = false;
+
+#ifdef ENABLE_MQTT
+void sortUint16(uint16_t* arr, uint8_t n) {
+  for (uint8_t i = 1; i < n; i++) {
+    uint16_t key = arr[i];
+    int8_t j = i - 1;
+    while (j >= 0 && arr[j] > key) {
+      arr[j + 1] = arr[j];
+      j--;
+    }
+    arr[j + 1] = key;
+  }
+}
+
+void sortFloat(float* arr, uint8_t n) {
+  for (uint8_t i = 1; i < n; i++) {
+    float key = arr[i];
+    int8_t j = i - 1;
+    while (j >= 0 && arr[j] > key) {
+      arr[j + 1] = arr[j];
+      j--;
+    }
+    arr[j + 1] = key;
+  }
+}
+
+bool winsorizedMeanUint16(uint16_t* samples, uint8_t count, float* out) {
+  if (count < MQTT_MIN_SAMPLES) return false;
+  sortUint16(samples, count);
+  uint8_t trimCount = count / 10;
+  uint8_t start = trimCount;
+  uint8_t end = count - trimCount;
+  float sum = 0;
+  for (uint8_t i = start; i < end; i++) {
+    sum += samples[i];
+  }
+  *out = sum / (end - start);
+  return true;
+}
+
+bool winsorizedMeanFloat(float* samples, uint8_t count, float* out) {
+  if (count < MQTT_MIN_SAMPLES) return false;
+  sortFloat(samples, count);
+  uint8_t trimCount = count / 10;
+  uint8_t start = trimCount;
+  uint8_t end = count - trimCount;
+  float sum = 0;
+  for (uint8_t i = start; i < end; i++) {
+    sum += samples[i];
+  }
+  *out = sum / (end - start);
+  return true;
+}
+
+void resetSampleBuffers() {
+  sampleCountCo2Ppm = 0;
+  sampleCountCo2Status = 0;
+  sampleCountPm1_0 = 0;
+  sampleCountPm2_5 = 0;
+  sampleCountPm10_0 = 0;
+  sampleCountParticle0_3um = 0;
+  sampleCountParticle0_5um = 0;
+  sampleCountParticle1_0um = 0;
+  sampleCountParticle2_5um = 0;
+  sampleCountParticle5_0um = 0;
+  sampleCountParticle10_0um = 0;
+  sampleCountSgp30co2eq = 0;
+  sampleCountSgp30tvoc = 0;
+  sampleCountSht31Temp = 0;
+  sampleCountSht31Hum = 0;
+}
+#endif
 
 void setup() {
   Serial.begin(9600);
@@ -1008,6 +1124,48 @@ void loop() {
   } else {
     DEBUG_PRINT("Unexpected number of bytes\n");
     while(Wire.available()) { Wire.read(); }
+  }
+#endif
+
+#ifdef ENABLE_MQTT
+  if (mqttEnabled) {
+    if (co2SensorPpm != (uint16_t)-1 && sampleCountCo2Ppm < MQTT_SAMPLE_COUNT) {
+      samplesCo2Ppm[sampleCountCo2Ppm++] = co2SensorPpm;
+    }
+    if (co2SensorStatus != (uint16_t)-1 && sampleCountCo2Status < MQTT_SAMPLE_COUNT) {
+      samplesCo2Status[sampleCountCo2Status++] = co2SensorStatus;
+    }
+
+    if (particleSensorChecksumOk == 1) {
+      if (particleSensorPm1_0 != (uint16_t)-1 && sampleCountPm1_0 < MQTT_SAMPLE_COUNT)
+        samplesPm1_0[sampleCountPm1_0++] = particleSensorPm1_0;
+      if (particleSensorPm2_5 != (uint16_t)-1 && sampleCountPm2_5 < MQTT_SAMPLE_COUNT)
+        samplesPm2_5[sampleCountPm2_5++] = particleSensorPm2_5;
+      if (particleSensorPm10_0 != (uint16_t)-1 && sampleCountPm10_0 < MQTT_SAMPLE_COUNT)
+        samplesPm10_0[sampleCountPm10_0++] = particleSensorPm10_0;
+      if (particleSensorParticle0_3um != (uint16_t)-1 && sampleCountParticle0_3um < MQTT_SAMPLE_COUNT)
+        samplesParticle0_3um[sampleCountParticle0_3um++] = particleSensorParticle0_3um;
+      if (particleSensorParticle0_5um != (uint16_t)-1 && sampleCountParticle0_5um < MQTT_SAMPLE_COUNT)
+        samplesParticle0_5um[sampleCountParticle0_5um++] = particleSensorParticle0_5um;
+      if (particleSensorParticle1_0um != (uint16_t)-1 && sampleCountParticle1_0um < MQTT_SAMPLE_COUNT)
+        samplesParticle1_0um[sampleCountParticle1_0um++] = particleSensorParticle1_0um;
+      if (particleSensorParticle2_5um != (uint16_t)-1 && sampleCountParticle2_5um < MQTT_SAMPLE_COUNT)
+        samplesParticle2_5um[sampleCountParticle2_5um++] = particleSensorParticle2_5um;
+      if (particleSensorParticle5_0um != (uint16_t)-1 && sampleCountParticle5_0um < MQTT_SAMPLE_COUNT)
+        samplesParticle5_0um[sampleCountParticle5_0um++] = particleSensorParticle5_0um;
+      if (particleSensorParticle10_0um != (uint16_t)-1 && sampleCountParticle10_0um < MQTT_SAMPLE_COUNT)
+        samplesParticle10_0um[sampleCountParticle10_0um++] = particleSensorParticle10_0um;
+    }
+
+    if (sht31TemperatureChecksumOk == 1 && sht31Temperature != -1.0f && sampleCountSht31Temp < MQTT_SAMPLE_COUNT)
+      samplesSht31Temp[sampleCountSht31Temp++] = sht31Temperature;
+    if (sht31HumidityChecksumOk == 1 && sht31Humidity != -1.0f && sampleCountSht31Hum < MQTT_SAMPLE_COUNT)
+      samplesSht31Hum[sampleCountSht31Hum++] = sht31Humidity;
+
+    if (sgp30co2eqChecksumOk == 1 && sgp30co2eqPpm != (uint16_t)-1 && sampleCountSgp30co2eq < MQTT_SAMPLE_COUNT)
+      samplesSgp30co2eq[sampleCountSgp30co2eq++] = sgp30co2eqPpm;
+    if (sgp30tvocChecksumOk == 1 && sgp30tvocPpb != (uint16_t)-1 && sampleCountSgp30tvoc < MQTT_SAMPLE_COUNT)
+      samplesSgp30tvoc[sampleCountSgp30tvoc++] = sgp30tvocPpb;
   }
 #endif
 
