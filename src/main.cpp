@@ -499,12 +499,22 @@ void setup() {
   snprintf(portStr, sizeof(portStr), "%d", serverPort);
   char tempOffsetStr[8];
   snprintf(tempOffsetStr, sizeof(tempOffsetStr), "%.1f", temperatureOffset);
+  char mqttPortStr[6];
+  snprintf(mqttPortStr, sizeof(mqttPortStr), "%d", mqttPort);
   WiFiManagerParameter hostnameParam("hostname", "Server hostname", serverHostname, SERVER_HOSTNAME_MAX_LEN);
   WiFiManagerParameter portParam("port", "Server port", portStr, 6);
   WiFiManagerParameter tempOffsetParam("tempoffset", "Temperature offset", tempOffsetStr, 8);
+  WiFiManagerParameter mqttHostParam("mqtt_host", "MQTT host", mqttHost, MQTT_HOST_MAX_LEN);
+  WiFiManagerParameter mqttPortParam("mqtt_port", "MQTT port", mqttPortStr, 6);
+  WiFiManagerParameter mqttUserParam("mqtt_user", "MQTT username", mqttUser, MQTT_USER_MAX_LEN);
+  WiFiManagerParameter mqttPassParam("mqtt_pass", "MQTT password", mqttPass, MQTT_PASS_MAX_LEN);
   wifiManager.addParameter(&hostnameParam);
   wifiManager.addParameter(&portParam);
   wifiManager.addParameter(&tempOffsetParam);
+  wifiManager.addParameter(&mqttHostParam);
+  wifiManager.addParameter(&mqttPortParam);
+  wifiManager.addParameter(&mqttUserParam);
+  wifiManager.addParameter(&mqttPassParam);
   wifiManager.setSaveConfigCallback([]() { shouldSaveConfig = true; });
 
   if(!wifiManager.autoConnect()) {
@@ -518,6 +528,13 @@ void setup() {
     serverHostname[SERVER_HOSTNAME_MAX_LEN - 1] = '\0';
     serverPort = atoi(portParam.getValue());
     temperatureOffset = atof(tempOffsetParam.getValue());
+    strncpy(mqttHost, mqttHostParam.getValue(), MQTT_HOST_MAX_LEN - 1);
+    mqttHost[MQTT_HOST_MAX_LEN - 1] = '\0';
+    mqttPort = atoi(mqttPortParam.getValue());
+    strncpy(mqttUser, mqttUserParam.getValue(), MQTT_USER_MAX_LEN - 1);
+    mqttUser[MQTT_USER_MAX_LEN - 1] = '\0';
+    strncpy(mqttPass, mqttPassParam.getValue(), MQTT_PASS_MAX_LEN - 1);
+    mqttPass[MQTT_PASS_MAX_LEN - 1] = '\0';
     saveConfig();
   }
 
