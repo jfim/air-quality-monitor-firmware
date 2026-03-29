@@ -7,6 +7,10 @@
 #include <ESP8266WebServer.h>
 #include <LittleFS.h>
 
+#ifdef ENABLE_MQTT
+#include <PubSubClient.h>
+#endif
+
 #ifdef ENABLE_NETWORK
 ArduinoOTAClass arduinoOTA;
 ESP8266WebServer httpServer(80);
@@ -304,7 +308,9 @@ void handleConfigPost() {
       "<p>Hostname: " + String(serverHostname) + "</p>"
       "<p>Port: " + String(serverPort) + "</p>"
       "<p>Temperature offset: " + String(temperatureOffset) + "</p>"
-      "<a href='/config'>Back</a></body></html>");
+      "<p>Rebooting...</p></body></html>");
+    delay(500);
+    ESP.restart();
   } else {
     httpServer.send(400, "text/plain", "Missing hostname, port, or temperature offset\n");
   }
