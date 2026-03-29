@@ -27,6 +27,18 @@ char serverHostname[SERVER_HOSTNAME_MAX_LEN] = "air-quality-server.local";
 int serverPort = 1234;
 float temperatureOffset = -3.4f;
 
+#define MQTT_HOST_MAX_LEN 64
+#define MQTT_USER_MAX_LEN 64
+#define MQTT_PASS_MAX_LEN 64
+char mqttHost[MQTT_HOST_MAX_LEN] = "";
+int mqttPort = 1883;
+char mqttUser[MQTT_USER_MAX_LEN] = "";
+char mqttPass[MQTT_PASS_MAX_LEN] = "";
+bool tcpLoggingEnabled = false;
+bool mqttEnabled = false;
+bool mqttHaDiscoveryEnabled = false;
+bool serialLoggingEnabled = false;
+
 #ifdef ENABLE_SERIAL_DEBUGGING
 #define DEBUG_PRINT(X) Serial.print(X)
 #define DEBUG_PRINT_2(X, Y) Serial.print(X, Y)
@@ -198,38 +210,100 @@ uint16_t modbusCrc16(uint8_t* data, uint8_t len) {
 }
 
 void loadConfig() {
-  if (LittleFS.exists("/config.txt")) {
-    File f = LittleFS.open("/config.txt", "r");
-    if (f) {
-      String hostname = f.readStringUntil('\n');
-      String port = f.readStringUntil('\n');
-      f.close();
-      hostname.trim();
-      port.trim();
-      if (hostname.length() > 0 && hostname.length() < SERVER_HOSTNAME_MAX_LEN) {
-        strncpy(serverHostname, hostname.c_str(), SERVER_HOSTNAME_MAX_LEN - 1);
-        serverHostname[SERVER_HOSTNAME_MAX_LEN - 1] = '\0';
-      }
-      if (port.length() > 0) {
-        serverPort = port.toInt();
-      }
-      String tempOffset = f.readStringUntil('\n');
-      tempOffset.trim();
-      if (tempOffset.length() > 0) {
-        temperatureOffset = tempOffset.toFloat();
-      }
+  if (!LittleFS.exists("/config.txt")) return;
+
+  File f = LittleFS.open("/config.txt", "r");
+  if (!f) return;
+
+  String firstLine = f.readStringUntil('\n');
+  firstLine.trim();
+
+  if (firstLine.indexOf('=') == -1) {
+    // Old 3-line positional format
+    if (firstLine.length() > 0 && firstLine.length() < SERVER_HOSTNAME_MAX_LEN) {
+      strncpy(serverHostname, firstLine.c_str(), SERVER_HOSTNAME_MAX_LEN - 1);
+      serverHostname[SERVER_HOSTNAME_MAX_LEN - 1] = '\0';
+    }
+    String port = f.readStringUntil('\n');
+    port.trim();
+    if (port.length() > 0) {
+      serverPort = port.toInt();
+    }
+    String tempOffset = f.readStringUntil('\n');
+    tempOffset.trim();
+    if (tempOffset.length() > 0) {
+      temperatureOffset = tempOffset.toFloat();
+    }
+    f.close();
+    return;
+  }
+
+  // New key-value format
+  auto processLine = [](const String& line) {
+    int eqPos = line.indexOf('=');
+    if (eqPos == -1) return;
+    String key = line.substring(0, eqPos);
+    String value = line.substring(eqPos + 1);
+    key.trim();
+    value.trim();
+
+    if (key == "server_hostname" && value.length() > 0 && value.length() < SERVER_HOSTNAME_MAX_LEN) {
+      strncpy(serverHostname, value.c_str(), SERVER_HOSTNAME_MAX_LEN - 1);
+      serverHostname[SERVER_HOSTNAME_MAX_LEN - 1] = '\0';
+    } else if (key == "server_port" && value.length() > 0) {
+      serverPort = value.toInt();
+    } else if (key == "temperature_offset" && value.length() > 0) {
+      temperatureOffset = value.toFloat();
+    } else if (key == "mqtt_host" && value.length() < MQTT_HOST_MAX_LEN) {
+      strncpy(mqttHost, value.c_str(), MQTT_HOST_MAX_LEN - 1);
+      mqttHost[MQTT_HOST_MAX_LEN - 1] = '\0';
+    } else if (key == "mqtt_port" && value.length() > 0) {
+      mqttPort = value.toInt();
+    } else if (key == "mqtt_user" && value.length() < MQTT_USER_MAX_LEN) {
+      strncpy(mqttUser, value.c_str(), MQTT_USER_MAX_LEN - 1);
+      mqttUser[MQTT_USER_MAX_LEN - 1] = '\0';
+    } else if (key == "mqtt_pass" && value.length() < MQTT_PASS_MAX_LEN) {
+      strncpy(mqttPass, value.c_str(), MQTT_PASS_MAX_LEN - 1);
+      mqttPass[MQTT_PASS_MAX_LEN - 1] = '\0';
+    } else if (key == "tcp_logging_enabled") {
+      tcpLoggingEnabled = (value == "1");
+    } else if (key == "mqtt_enabled") {
+      mqttEnabled = (value == "1");
+    } else if (key == "mqtt_ha_discovery") {
+      mqttHaDiscoveryEnabled = (value == "1");
+    } else if (key == "serial_logging_enabled") {
+      serialLoggingEnabled = (value == "1");
+    }
+  };
+
+  processLine(firstLine);
+  while (f.available()) {
+    String line = f.readStringUntil('\n');
+    line.trim();
+    if (line.length() > 0) {
+      processLine(line);
     }
   }
+  f.close();
 }
 
 void saveConfig() {
   File f = LittleFS.open("/config.txt", "w");
-  if (f) {
-    f.println(serverHostname);
-    f.println(serverPort);
-    f.println(temperatureOffset);
-    f.close();
-  }
+  if (!f) return;
+
+  f.print("server_hostname="); f.println(serverHostname);
+  f.print("server_port="); f.println(serverPort);
+  f.print("temperature_offset="); f.println(temperatureOffset);
+  f.print("mqtt_host="); f.println(mqttHost);
+  f.print("mqtt_port="); f.println(mqttPort);
+  f.print("mqtt_user="); f.println(mqttUser);
+  f.print("mqtt_pass="); f.println(mqttPass);
+  f.print("tcp_logging_enabled="); f.println(tcpLoggingEnabled ? "1" : "0");
+  f.print("mqtt_enabled="); f.println(mqttEnabled ? "1" : "0");
+  f.print("mqtt_ha_discovery="); f.println(mqttHaDiscoveryEnabled ? "1" : "0");
+  f.print("serial_logging_enabled="); f.println(serialLoggingEnabled ? "1" : "0");
+
+  f.close();
 }
 
 #ifdef ENABLE_NETWORK
