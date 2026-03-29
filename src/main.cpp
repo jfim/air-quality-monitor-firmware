@@ -566,6 +566,50 @@ void resetSampleBuffers() {
   sampleCountSht31Hum = 0;
 }
 
+void publishMqttDiscoverySensor(const char* sensorId, const char* name,
+                                 const char* unit, const char* deviceClass,
+                                 const char* valueTemplate) {
+  String topic = "homeassistant/sensor/" + macAddress + "_" + sensorId + "/config";
+  String stateTopic = "air-quality/" + macAddress + "/state";
+
+  String payload = "{\"name\":\"" + String(name) + "\","
+    "\"unique_id\":\"" + macAddress + "_" + sensorId + "\","
+    "\"state_topic\":\"" + stateTopic + "\","
+    "\"value_template\":\"" + String(valueTemplate) + "\"";
+
+  if (strlen(unit) > 0) {
+    payload += ",\"unit_of_measurement\":\"" + String(unit) + "\"";
+  }
+  if (strlen(deviceClass) > 0) {
+    payload += ",\"device_class\":\"" + String(deviceClass) + "\"";
+  }
+
+  payload += ",\"device\":{"
+    "\"identifiers\":[\"" + macAddress + "\"],"
+    "\"name\":\"Air Quality Monitor\","
+    "\"manufacturer\":\"DIY\"}}";
+
+  mqttClient.publish(topic.c_str(), payload.c_str(), true);
+}
+
+void publishMqttDiscovery() {
+  publishMqttDiscoverySensor("co2", "CO2", "ppm", "carbon_dioxide", "{{ value_json.co2 }}");
+  publishMqttDiscoverySensor("co2_status", "CO2 Status", "", "", "{{ value_json.co2_status }}");
+  publishMqttDiscoverySensor("pm1_0", "PM1.0", "µg/m³", "pm1", "{{ value_json.pm1_0 }}");
+  publishMqttDiscoverySensor("pm2_5", "PM2.5", "µg/m³", "pm25", "{{ value_json.pm2_5 }}");
+  publishMqttDiscoverySensor("pm10_0", "PM10.0", "µg/m³", "pm10", "{{ value_json.pm10_0 }}");
+  publishMqttDiscoverySensor("particle_0_3um", "Particles >0.3µm", "/0.1L", "", "{{ value_json.particle_0_3um }}");
+  publishMqttDiscoverySensor("particle_0_5um", "Particles >0.5µm", "/0.1L", "", "{{ value_json.particle_0_5um }}");
+  publishMqttDiscoverySensor("particle_1_0um", "Particles >1.0µm", "/0.1L", "", "{{ value_json.particle_1_0um }}");
+  publishMqttDiscoverySensor("particle_2_5um", "Particles >2.5µm", "/0.1L", "", "{{ value_json.particle_2_5um }}");
+  publishMqttDiscoverySensor("particle_5_0um", "Particles >5.0µm", "/0.1L", "", "{{ value_json.particle_5_0um }}");
+  publishMqttDiscoverySensor("particle_10_0um", "Particles >10.0µm", "/0.1L", "", "{{ value_json.particle_10_0um }}");
+  publishMqttDiscoverySensor("temperature", "Temperature", "°C", "temperature", "{{ value_json.temperature }}");
+  publishMqttDiscoverySensor("humidity", "Humidity", "%", "humidity", "{{ value_json.humidity }}");
+  publishMqttDiscoverySensor("co2eq", "CO2 Equivalent", "ppm", "carbon_dioxide", "{{ value_json.co2eq }}");
+  publishMqttDiscoverySensor("tvoc", "TVOC", "ppb", "volatile_organic_compounds_parts", "{{ value_json.tvoc }}");
+}
+
 void publishMqttState() {
   String stateTopic = "air-quality/" + macAddress + "/state";
   String json = "{";
@@ -1308,6 +1352,9 @@ void loop() {
         }
         if (connected) {
           DEBUG_PRINT("MQTT connected\n");
+          if (mqttHaDiscoveryEnabled) {
+            publishMqttDiscovery();
+          }
         } else {
           DEBUG_PRINT("MQTT connection failed, rc=");
           DEBUG_PRINT(mqttClient.state());
