@@ -9,6 +9,11 @@
 
 #ifdef ENABLE_MQTT
 #include <PubSubClient.h>
+WiFiClient mqttWifiClient;
+PubSubClient mqttClient(mqttWifiClient);
+unsigned long lastMqttReconnectAttempt = 0;
+#define MQTT_RECONNECT_INTERVAL_MS 5000
+#define MQTT_BUFFER_SIZE 512
 #endif
 
 #ifdef ENABLE_NETWORK
@@ -560,6 +565,54 @@ void resetSampleBuffers() {
   sampleCountSht31Temp = 0;
   sampleCountSht31Hum = 0;
 }
+
+void publishMqttState() {
+  String stateTopic = "air-quality/" + macAddress + "/state";
+  String json = "{";
+  bool first = true;
+  float val;
+
+  #define APPEND_UINT16_FIELD(name, samples, count) \
+    if (winsorizedMeanUint16(samples, count, &val)) { \
+      if (!first) json += ","; \
+      json += "\"" name "\":" + String((int)round(val)); \
+      first = false; \
+    }
+
+  #define APPEND_FLOAT_FIELD(name, samples, count) \
+    if (winsorizedMeanFloat(samples, count, &val)) { \
+      if (!first) json += ","; \
+      json += "\"" name "\":" + String(val, 1); \
+      first = false; \
+    }
+
+  APPEND_UINT16_FIELD("co2", samplesCo2Ppm, sampleCountCo2Ppm)
+  APPEND_UINT16_FIELD("co2_status", samplesCo2Status, sampleCountCo2Status)
+  APPEND_UINT16_FIELD("pm1_0", samplesPm1_0, sampleCountPm1_0)
+  APPEND_UINT16_FIELD("pm2_5", samplesPm2_5, sampleCountPm2_5)
+  APPEND_UINT16_FIELD("pm10_0", samplesPm10_0, sampleCountPm10_0)
+  APPEND_UINT16_FIELD("particle_0_3um", samplesParticle0_3um, sampleCountParticle0_3um)
+  APPEND_UINT16_FIELD("particle_0_5um", samplesParticle0_5um, sampleCountParticle0_5um)
+  APPEND_UINT16_FIELD("particle_1_0um", samplesParticle1_0um, sampleCountParticle1_0um)
+  APPEND_UINT16_FIELD("particle_2_5um", samplesParticle2_5um, sampleCountParticle2_5um)
+  APPEND_UINT16_FIELD("particle_5_0um", samplesParticle5_0um, sampleCountParticle5_0um)
+  APPEND_UINT16_FIELD("particle_10_0um", samplesParticle10_0um, sampleCountParticle10_0um)
+  APPEND_FLOAT_FIELD("temperature", samplesSht31Temp, sampleCountSht31Temp)
+  APPEND_FLOAT_FIELD("humidity", samplesSht31Hum, sampleCountSht31Hum)
+  APPEND_UINT16_FIELD("co2eq", samplesSgp30co2eq, sampleCountSgp30co2eq)
+  APPEND_UINT16_FIELD("tvoc", samplesSgp30tvoc, sampleCountSgp30tvoc)
+
+  #undef APPEND_UINT16_FIELD
+  #undef APPEND_FLOAT_FIELD
+
+  json += "}";
+
+  if (!first) {
+    mqttClient.publish(stateTopic.c_str(), json.c_str());
+  }
+
+  resetSampleBuffers();
+}
 #endif
 
 void setup() {
@@ -674,6 +727,12 @@ void setup() {
   for(int i = 0; i < 6; ++i) {
     macAddress += String(hwAddr[i], HEX);
   }
+#endif
+
+#ifdef ENABLE_MQTT
+  mqttClient.setServer(mqttHost, mqttPort);
+  mqttClient.setBufferSize(MQTT_BUFFER_SIZE);
+  mqttClient.setKeepAlive(60);
 #endif
 
   // Wait for hardware to initialize (~15s for SGP30)
@@ -1230,6 +1289,39 @@ void loop() {
       asyncClient.connect(serverHostname, serverPort);
     } else {
       DEBUG_PRINT("Awaiting connection\n");
+    }
+  }
+#endif
+
+#ifdef ENABLE_MQTT
+  if (mqttEnabled && strlen(mqttHost) > 0) {
+    if (!mqttClient.connected()) {
+      unsigned long now = millis();
+      if (now - lastMqttReconnectAttempt > MQTT_RECONNECT_INTERVAL_MS) {
+        lastMqttReconnectAttempt = now;
+        String clientId = "aq-" + macAddress;
+        bool connected;
+        if (strlen(mqttUser) > 0) {
+          connected = mqttClient.connect(clientId.c_str(), mqttUser, mqttPass);
+        } else {
+          connected = mqttClient.connect(clientId.c_str());
+        }
+        if (connected) {
+          DEBUG_PRINT("MQTT connected\n");
+        } else {
+          DEBUG_PRINT("MQTT connection failed, rc=");
+          DEBUG_PRINT(mqttClient.state());
+          DEBUG_PRINT("\n");
+        }
+      }
+    } else {
+      mqttClient.loop();
+
+      unsigned long now = millis();
+      if (now - lastMqttPublishMs >= MQTT_PUBLISH_INTERVAL_MS) {
+        lastMqttPublishMs = now;
+        publishMqttState();
+      }
     }
   }
 #endif
