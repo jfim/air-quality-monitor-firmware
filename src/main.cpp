@@ -13,7 +13,7 @@ WiFiClient mqttWifiClient;
 PubSubClient mqttClient(mqttWifiClient);
 unsigned long lastMqttReconnectAttempt = 0;
 #define MQTT_RECONNECT_INTERVAL_MS 5000
-#define MQTT_BUFFER_SIZE 512
+#define MQTT_BUFFER_SIZE 768
 #endif
 
 #ifdef ENABLE_NETWORK
@@ -767,10 +767,10 @@ void setup() {
 #if defined(ENABLE_NETWORK_LOGGING) || defined(ENABLE_MQTT)
   uint8_t hwAddr[6];
   WiFi.macAddress(hwAddr);
-  macAddress.reserve(12);
-  for(int i = 0; i < 6; ++i) {
-    macAddress += String(hwAddr[i], HEX);
-  }
+  char macBuf[13];
+  snprintf(macBuf, sizeof(macBuf), "%02x%02x%02x%02x%02x%02x",
+           hwAddr[0], hwAddr[1], hwAddr[2], hwAddr[3], hwAddr[4], hwAddr[5]);
+  macAddress = macBuf;
 #endif
 
 #ifdef ENABLE_MQTT
