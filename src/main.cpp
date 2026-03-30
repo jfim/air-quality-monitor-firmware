@@ -258,6 +258,54 @@ uint16_t modbusCrc16(uint8_t* data, uint8_t len) {
   return crc;
 }
 
+void processConfigLine(const String& line) {
+  int eqPos = line.indexOf('=');
+  if (eqPos == -1) return;
+  String key = line.substring(0, eqPos);
+  String value = line.substring(eqPos + 1);
+  key.trim();
+  value.trim();
+
+  if (key == "server_hostname" && value.length() > 0 && value.length() < SERVER_HOSTNAME_MAX_LEN) {
+    strncpy(serverHostname, value.c_str(), SERVER_HOSTNAME_MAX_LEN - 1);
+    serverHostname[SERVER_HOSTNAME_MAX_LEN - 1] = '\0';
+  } else if (key == "server_port" && value.length() > 0) {
+    serverPort = value.toInt();
+  } else if (key == "temperature_offset" && value.length() > 0) {
+    temperatureOffset = value.toFloat();
+  } else if (key == "mqtt_host" && value.length() < MQTT_HOST_MAX_LEN) {
+    strncpy(mqttHost, value.c_str(), MQTT_HOST_MAX_LEN - 1);
+    mqttHost[MQTT_HOST_MAX_LEN - 1] = '\0';
+  } else if (key == "mqtt_port" && value.length() > 0) {
+    mqttPort = value.toInt();
+  } else if (key == "mqtt_user" && value.length() < MQTT_USER_MAX_LEN) {
+    strncpy(mqttUser, value.c_str(), MQTT_USER_MAX_LEN - 1);
+    mqttUser[MQTT_USER_MAX_LEN - 1] = '\0';
+  } else if (key == "mqtt_pass" && value.length() < MQTT_PASS_MAX_LEN) {
+    strncpy(mqttPass, value.c_str(), MQTT_PASS_MAX_LEN - 1);
+    mqttPass[MQTT_PASS_MAX_LEN - 1] = '\0';
+  } else if (key == "tcp_logging_enabled") {
+    tcpLoggingEnabled = (value == "1");
+  } else if (key == "mqtt_enabled") {
+    mqttEnabled = (value == "1");
+  } else if (key == "mqtt_ha_discovery") {
+    mqttHaDiscoveryEnabled = (value == "1");
+  } else if (key == "serial_logging_enabled") {
+    serialLoggingEnabled = (value == "1");
+  } else {
+    DEBUG_PRINT("Unknown config key: ");
+    DEBUG_PRINT(key);
+    DEBUG_PRINT("\n");
+    return;
+  }
+
+  DEBUG_PRINT("Config: ");
+  DEBUG_PRINT(key);
+  DEBUG_PRINT("=");
+  DEBUG_PRINT(value);
+  DEBUG_PRINT("\n");
+}
+
 void loadConfig() {
   if (!LittleFS.exists("/config.txt")) return;
 
@@ -269,76 +317,53 @@ void loadConfig() {
 
   if (firstLine.indexOf('=') == -1) {
     // Old 3-line positional format
+    DEBUG_PRINT("Loading old config format, will migrate on next save\n");
     if (firstLine.length() > 0 && firstLine.length() < SERVER_HOSTNAME_MAX_LEN) {
       strncpy(serverHostname, firstLine.c_str(), SERVER_HOSTNAME_MAX_LEN - 1);
       serverHostname[SERVER_HOSTNAME_MAX_LEN - 1] = '\0';
+      DEBUG_PRINT("Config: server_hostname=");
+      DEBUG_PRINT(serverHostname);
+      DEBUG_PRINT("\n");
     }
     String port = f.readStringUntil('\n');
     port.trim();
     if (port.length() > 0) {
       serverPort = port.toInt();
+      DEBUG_PRINT("Config: server_port=");
+      DEBUG_PRINT(serverPort);
+      DEBUG_PRINT("\n");
     }
     String tempOffset = f.readStringUntil('\n');
     tempOffset.trim();
     if (tempOffset.length() > 0) {
       temperatureOffset = tempOffset.toFloat();
+      DEBUG_PRINT("Config: temperature_offset=");
+      DEBUG_PRINT(temperatureOffset);
+      DEBUG_PRINT("\n");
     }
     f.close();
     return;
   }
 
   // New key-value format
-  auto processLine = [](const String& line) {
-    int eqPos = line.indexOf('=');
-    if (eqPos == -1) return;
-    String key = line.substring(0, eqPos);
-    String value = line.substring(eqPos + 1);
-    key.trim();
-    value.trim();
-
-    if (key == "server_hostname" && value.length() > 0 && value.length() < SERVER_HOSTNAME_MAX_LEN) {
-      strncpy(serverHostname, value.c_str(), SERVER_HOSTNAME_MAX_LEN - 1);
-      serverHostname[SERVER_HOSTNAME_MAX_LEN - 1] = '\0';
-    } else if (key == "server_port" && value.length() > 0) {
-      serverPort = value.toInt();
-    } else if (key == "temperature_offset" && value.length() > 0) {
-      temperatureOffset = value.toFloat();
-    } else if (key == "mqtt_host" && value.length() < MQTT_HOST_MAX_LEN) {
-      strncpy(mqttHost, value.c_str(), MQTT_HOST_MAX_LEN - 1);
-      mqttHost[MQTT_HOST_MAX_LEN - 1] = '\0';
-    } else if (key == "mqtt_port" && value.length() > 0) {
-      mqttPort = value.toInt();
-    } else if (key == "mqtt_user" && value.length() < MQTT_USER_MAX_LEN) {
-      strncpy(mqttUser, value.c_str(), MQTT_USER_MAX_LEN - 1);
-      mqttUser[MQTT_USER_MAX_LEN - 1] = '\0';
-    } else if (key == "mqtt_pass" && value.length() < MQTT_PASS_MAX_LEN) {
-      strncpy(mqttPass, value.c_str(), MQTT_PASS_MAX_LEN - 1);
-      mqttPass[MQTT_PASS_MAX_LEN - 1] = '\0';
-    } else if (key == "tcp_logging_enabled") {
-      tcpLoggingEnabled = (value == "1");
-    } else if (key == "mqtt_enabled") {
-      mqttEnabled = (value == "1");
-    } else if (key == "mqtt_ha_discovery") {
-      mqttHaDiscoveryEnabled = (value == "1");
-    } else if (key == "serial_logging_enabled") {
-      serialLoggingEnabled = (value == "1");
-    }
-  };
-
-  processLine(firstLine);
+  processConfigLine(firstLine);
   while (f.available()) {
     String line = f.readStringUntil('\n');
     line.trim();
     if (line.length() > 0) {
-      processLine(line);
+      processConfigLine(line);
     }
   }
   f.close();
 }
 
 void saveConfig() {
+  DEBUG_PRINT("Saving config\n");
   File f = LittleFS.open("/config.txt", "w");
-  if (!f) return;
+  if (!f) {
+    DEBUG_PRINT("Failed to open config.txt for writing\n");
+    return;
+  }
 
   f.print("server_hostname="); f.println(serverHostname);
   f.print("server_port="); f.println(serverPort);
@@ -353,6 +378,7 @@ void saveConfig() {
   f.print("serial_logging_enabled="); f.println(serialLoggingEnabled ? "1" : "0");
 
   f.close();
+  DEBUG_PRINT("Config saved\n");
 }
 
 #ifdef ENABLE_NETWORK
@@ -748,6 +774,8 @@ void setup() {
     mqttUser[MQTT_USER_MAX_LEN - 1] = '\0';
     strncpy(mqttPass, mqttPassParam.getValue(), MQTT_PASS_MAX_LEN - 1);
     mqttPass[MQTT_PASS_MAX_LEN - 1] = '\0';
+    tcpLoggingEnabled = (strlen(serverHostname) > 0);
+    mqttEnabled = (strlen(mqttHost) > 0);
     saveConfig();
   }
 
