@@ -95,7 +95,6 @@ String macAddress("");
 
 // uint16_t sensor sample buffers
 uint16_t samplesCo2Ppm[MQTT_SAMPLE_COUNT];
-uint16_t samplesCo2Status[MQTT_SAMPLE_COUNT];
 uint16_t samplesPm1_0[MQTT_SAMPLE_COUNT];
 uint16_t samplesPm2_5[MQTT_SAMPLE_COUNT];
 uint16_t samplesPm10_0[MQTT_SAMPLE_COUNT];
@@ -109,7 +108,6 @@ uint16_t samplesSgp30co2eq[MQTT_SAMPLE_COUNT];
 uint16_t samplesSgp30tvoc[MQTT_SAMPLE_COUNT];
 
 uint8_t sampleCountCo2Ppm = 0;
-uint8_t sampleCountCo2Status = 0;
 uint8_t sampleCountPm1_0 = 0;
 uint8_t sampleCountPm2_5 = 0;
 uint8_t sampleCountPm10_0 = 0;
@@ -585,7 +583,7 @@ bool winsorizedMeanFloat(float* samples, uint8_t count, float* out) {
 
 void resetSampleBuffers() {
   sampleCountCo2Ppm = 0;
-  sampleCountCo2Status = 0;
+
   sampleCountPm1_0 = 0;
   sampleCountPm2_5 = 0;
   sampleCountPm10_0 = 0;
@@ -629,7 +627,6 @@ void publishMqttDiscoverySensor(const char* sensorId, const char* name,
 
 void publishMqttDiscovery() {
   publishMqttDiscoverySensor("co2", "CO2", "ppm", "carbon_dioxide", "{{ value_json.co2 }}");
-  publishMqttDiscoverySensor("co2_status", "CO2 Status", "", "", "{{ value_json.co2_status }}");
   publishMqttDiscoverySensor("pm1_0", "PM1.0", "µg/m³", "pm1", "{{ value_json.pm1_0 }}");
   publishMqttDiscoverySensor("pm2_5", "PM2.5", "µg/m³", "pm25", "{{ value_json.pm2_5 }}");
   publishMqttDiscoverySensor("pm10_0", "PM10.0", "µg/m³", "pm10", "{{ value_json.pm10_0 }}");
@@ -654,7 +651,7 @@ void publishMqttState() {
   #define APPEND_UINT16_FIELD(name, samples, count) \
     if (winsorizedMeanUint16(samples, count, &val)) { \
       if (!first) json += ","; \
-      json += "\"" name "\":" + String((int)round(val)); \
+      json += "\"" name "\":" + String(val, 1); \
       first = false; \
     }
 
@@ -666,7 +663,6 @@ void publishMqttState() {
     }
 
   APPEND_UINT16_FIELD("co2", samplesCo2Ppm, sampleCountCo2Ppm)
-  APPEND_UINT16_FIELD("co2_status", samplesCo2Status, sampleCountCo2Status)
   APPEND_UINT16_FIELD("pm1_0", samplesPm1_0, sampleCountPm1_0)
   APPEND_UINT16_FIELD("pm2_5", samplesPm2_5, sampleCountPm2_5)
   APPEND_UINT16_FIELD("pm10_0", samplesPm10_0, sampleCountPm10_0)
@@ -1276,9 +1272,6 @@ void loop() {
   if (mqttEnabled) {
     if (co2SensorPpm != (uint16_t)-1 && sampleCountCo2Ppm < MQTT_SAMPLE_COUNT) {
       samplesCo2Ppm[sampleCountCo2Ppm++] = co2SensorPpm;
-    }
-    if (co2SensorStatus != (uint16_t)-1 && sampleCountCo2Status < MQTT_SAMPLE_COUNT) {
-      samplesCo2Status[sampleCountCo2Status++] = co2SensorStatus;
     }
 
     if (particleSensorChecksumOk == 1) {
