@@ -43,6 +43,7 @@ bool tcpLoggingEnabled = false;
 bool mqttEnabled = false;
 bool mqttHaDiscoveryEnabled = false;
 bool serialLoggingEnabled = false;
+int co2Baseline = 400;
 
 #ifdef ENABLE_SERIAL_DEBUGGING
 #define DEBUG_PRINT(X) Serial.print(X)
@@ -292,6 +293,8 @@ void processConfigLine(const String& line) {
     mqttHaDiscoveryEnabled = (value == "1");
   } else if (key == "serial_logging_enabled") {
     serialLoggingEnabled = (value == "1");
+  } else if (key == "co2_baseline" && value.length() > 0) {
+    co2Baseline = value.toInt();
   } else {
     DEBUG_PRINT("Unknown config key: ");
     DEBUG_PRINT(key);
@@ -376,6 +379,7 @@ void saveConfig() {
   f.print("mqtt_enabled="); f.println(mqttEnabled ? "1" : "0");
   f.print("mqtt_ha_discovery="); f.println(mqttHaDiscoveryEnabled ? "1" : "0");
   f.print("serial_logging_enabled="); f.println(serialLoggingEnabled ? "1" : "0");
+  f.print("co2_baseline="); f.println(co2Baseline);
 
   f.close();
   DEBUG_PRINT("Config saved\n");
@@ -404,6 +408,7 @@ void handleStatus() {
   String json = "{\"config\":{\"hostname\":\"" + String(serverHostname) + "\","
     "\"port\":" + String(serverPort) + ","
     "\"temperatureOffset\":" + String(temperatureOffset) + ","
+    "\"co2Baseline\":" + String(co2Baseline) + ","
     "\"mqttHost\":\"" + String(mqttHost) + "\","
     "\"mqttPort\":" + String(mqttPort) + ","
     "\"tcpLoggingEnabled\":" + String(tcpLoggingEnabled ? "true" : "false") + ","
@@ -443,6 +448,7 @@ void handleConfigGet() {
     "<label>Server hostname: <input name='hostname' value='" + String(serverHostname) + "' maxlength='63'></label><br><br>"
     "<label>Server port: <input name='port' type='number' value='" + String(serverPort) + "'></label><br><br>"
     "<label>Temperature offset: <input name='tempoffset' type='number' step='0.1' value='" + String(temperatureOffset) + "'></label><br><br>"
+    "<label>CO2 baseline (ppm): <input name='co2_baseline' type='number' value='" + String(co2Baseline) + "'></label><br><br>"
     "<h3>MQTT</h3>"
     "<label>MQTT host: <input name='mqtt_host' value='" + String(mqttHost) + "' maxlength='63'></label><br><br>"
     "<label>MQTT port: <input name='mqtt_port' type='number' value='" + String(mqttPort) + "'></label><br><br>"
@@ -469,6 +475,9 @@ void handleConfigPost() {
     }
     serverPort = httpServer.arg("port").toInt();
     temperatureOffset = httpServer.arg("tempoffset").toFloat();
+    if (httpServer.hasArg("co2_baseline") && httpServer.arg("co2_baseline").length() > 0) {
+      co2Baseline = httpServer.arg("co2_baseline").toInt();
+    }
 
     if (httpServer.hasArg("mqtt_host")) {
       String mh = httpServer.arg("mqtt_host");
@@ -738,11 +747,14 @@ void setup() {
   snprintf(portStr, sizeof(portStr), "%d", serverPort);
   char tempOffsetStr[8];
   snprintf(tempOffsetStr, sizeof(tempOffsetStr), "%.1f", temperatureOffset);
+  char co2BaselineStr[6];
+  snprintf(co2BaselineStr, sizeof(co2BaselineStr), "%d", co2Baseline);
   char mqttPortStr[6];
   snprintf(mqttPortStr, sizeof(mqttPortStr), "%d", mqttPort);
   WiFiManagerParameter hostnameParam("hostname", "Server hostname", serverHostname, SERVER_HOSTNAME_MAX_LEN);
   WiFiManagerParameter portParam("port", "Server port", portStr, 6);
   WiFiManagerParameter tempOffsetParam("tempoffset", "Temperature offset", tempOffsetStr, 8);
+  WiFiManagerParameter co2BaselineParam("co2_baseline", "CO2 baseline (ppm)", co2BaselineStr, 6);
   WiFiManagerParameter mqttHostParam("mqtt_host", "MQTT host", mqttHost, MQTT_HOST_MAX_LEN);
   WiFiManagerParameter mqttPortParam("mqtt_port", "MQTT port", mqttPortStr, 6);
   WiFiManagerParameter mqttUserParam("mqtt_user", "MQTT username", mqttUser, MQTT_USER_MAX_LEN);
@@ -750,6 +762,7 @@ void setup() {
   wifiManager.addParameter(&hostnameParam);
   wifiManager.addParameter(&portParam);
   wifiManager.addParameter(&tempOffsetParam);
+  wifiManager.addParameter(&co2BaselineParam);
   wifiManager.addParameter(&mqttHostParam);
   wifiManager.addParameter(&mqttPortParam);
   wifiManager.addParameter(&mqttUserParam);
@@ -767,6 +780,7 @@ void setup() {
     serverHostname[SERVER_HOSTNAME_MAX_LEN - 1] = '\0';
     serverPort = atoi(portParam.getValue());
     temperatureOffset = atof(tempOffsetParam.getValue());
+    co2Baseline = atoi(co2BaselineParam.getValue());
     strncpy(mqttHost, mqttHostParam.getValue(), MQTT_HOST_MAX_LEN - 1);
     mqttHost[MQTT_HOST_MAX_LEN - 1] = '\0';
     mqttPort = atoi(mqttPortParam.getValue());
@@ -957,7 +971,7 @@ void loop() {
         DEBUG_PRINT("\n");
 
         co2SensorStatus = sensorStatus;
-        co2SensorPpm = co2Ppm;
+        co2SensorPpm = co2Ppm + (co2Baseline - 400);
       } else {
         DEBUG_PRINT("Corrupted CO2 sensor frame\n");
 
